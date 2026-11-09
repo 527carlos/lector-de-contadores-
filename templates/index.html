@@ -1,0 +1,41 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Lector de contadores</title>
+  <style>
+    :root { --bg:#f5f6f8; --card:#fff; --texto:#1d2330; --acento:#2456d6; --error:#b42318; }
+    @media (prefers-color-scheme: dark) {
+      :root { --bg:#14171f; --card:#1d222d; --texto:#e7eaf0; --acento:#7ea2ff; --error:#ff8a80; }
+    }
+    body { margin:0; font-family: system-ui, sans-serif; background:var(--bg); color:var(--texto); }
+    main { max-width:560px; margin:48px auto; padding:0 16px; }
+    .card { background:var(--card); border-radius:12px; padding:24px; box-shadow:0 1px 3px rgba(0,0,0,.1); }
+    h1 { font-size:1.4rem; margin:0 0 8px; }
+    p { line-height:1.5; }
+    input[type=file] { margin:16px 0; width:100%; }
+    button { background:var(--acento); color:#fff; border:0; border-radius:8px; padding:12px 18px; font-size:1rem; cursor:pointer; width:100%; }
+    .error { color:var(--error); font-weight:600; }
+    ul { padding-left:20px; }
+  </style>
+</head>
+<body>
+<main>
+  <div class="card">
+    <h1>Lector de contadores</h1>
+    <p>Sube un <strong>.zip</strong> con los PDFs de las impresoras. Recibirás un zip con:</p>
+    <ul>
+      <li><code>contadores.txt</code>: serial, contador, modelo, archivo original y nota manuscrita (separado por tabulaciones).</li>
+      <li><code>errores.txt</code>: archivos no procesados, duplicados descartados y seriales a revisar.</li>
+      <li><code>pdfs_renombrados/</code>: cada PDF renombrado como <code>SERIAL.pdf</code>.</li>
+    </ul>
+    {% if error %}<p class="error">{{ error }}</p>{% endif %}
+    <form method="post" action="/procesar" enctype="multipart/form-data">
+      <input type="file" name="archivo" accept=".zip" required>
+      <button type="submit">Procesar</button>
+    </form>
+  </div>
+</main>
+</body>
+</html>

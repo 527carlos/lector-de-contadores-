@@ -1,0 +1,6 @@
+services:
+  - type: web
+    name: lector-de-contadores
+    runtime: docker
+    plan: free
+    healthCheckPath: /healthz
