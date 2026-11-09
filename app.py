@@ -5,6 +5,7 @@ from pathlib import Path
 
 from flask import Flask, render_template, request, send_file
 
+from lector.comparar import ExcelError
 from lector.procesar import procesar_zip
 
 app = Flask(__name__)
@@ -27,13 +28,24 @@ def procesar():
     if archivo is None or not archivo.filename or not archivo.filename.lower().endswith(".zip"):
         return render_template("index.html", error="Sube un archivo .zip con los PDFs."), 400
 
+    excel = request.files.get("excel")
+    tiene_excel = excel is not None and bool(excel.filename)
+    if tiene_excel and not excel.filename.lower().endswith(".xlsx"):
+        return render_template("index.html", error="El listado de seriales debe ser un .xlsx."), 400
+
     with tempfile.TemporaryDirectory() as tmp:
         zip_path = Path(tmp) / "entrada.zip"
         archivo.save(zip_path)
+        excel_path = None
+        if tiene_excel:
+            excel_path = Path(tmp) / "listado.xlsx"
+            excel.save(excel_path)
         try:
-            datos = procesar_zip(zip_path, Path(tmp) / "trabajo")
+            datos = procesar_zip(zip_path, Path(tmp) / "trabajo", excel_path)
         except zipfile.BadZipFile:
             return render_template("index.html", error="El archivo no es un .zip válido."), 400
+        except ExcelError as e:
+            return render_template("index.html", error=f"Listado de seriales: {e}."), 400
 
     return send_file(
         BytesIO(datos),

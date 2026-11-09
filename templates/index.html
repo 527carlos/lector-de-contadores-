@@ -32,7 +32,12 @@
     </ul>
     {% if error %}<p class="error">{{ error }}</p>{% endif %}
     <form method="post" action="/procesar" enctype="multipart/form-data">
+      <label>PDFs (.zip)</label>
       <input type="file" name="archivo" accept=".zip" required>
+      <label>Listado de seriales (.xlsx, opcional)</label>
+      <input type="file" name="excel" accept=".xlsx">
+      <p>Si subes el listado, recibirás también <code>comparacion.txt</code> con los seriales que coinciden, faltan o sobran.
+         La primera columna del Excel (o la que se titule "Serial" / "Número de serie") se usa como listado.</p>
       <button type="submit">Procesar</button>
     </form>
   </div>

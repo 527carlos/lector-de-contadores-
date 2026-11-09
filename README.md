@@ -5,6 +5,9 @@ Aplicación web que recibe un `.zip` con PDFs de reportes de impresoras (escanea
 - `contadores.txt`: tabla separada por tabulaciones con `serial`, `contador`, `modelo`, `archivo_original` y `nota_manuscrita`.
 - `errores.txt`: archivos no procesados, duplicados descartados y registros a revisar.
 - `pdfs_renombrados/`: cada PDF copiado como `SERIAL.pdf`.
+- `comparacion.txt` (opcional): si se sube un listado de seriales en `.xlsx`, compara ese listado con los seriales de los PDF. Estados: `coincide`, `posible coincidencia` (difieren solo en O/0 o I/1, típico del OCR), `solo en Excel (sin PDF)` y `solo en PDF (no está en Excel)`.
+
+El listado de seriales se toma de la primera hoja: la columna titulada "Serial", "Serie" o "Número de serie"; si no hay encabezado reconocible, la primera columna (omitiendo la primera fila).
 
 ## Modelos soportados
 

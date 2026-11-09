@@ -10,6 +10,7 @@ from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path, PurePosixPath
 
+from .comparar import comparar, leer_seriales_excel
 from .ocr import ocr_nota, ocr_pdf
 from .parsers import NOTA_RECORTE, UMBRAL_CONFIANZA, LecturaError, leer
 
@@ -104,8 +105,10 @@ def _contadores_tsv(conservados: list[Registro]) -> str:
     return "﻿" + salida.getvalue()
 
 
-def procesar_zip(zip_path: Path, trabajo: Path) -> bytes:
+def procesar_zip(zip_path: Path, trabajo: Path, excel_path: Path | None = None) -> bytes:
     trabajo.mkdir(parents=True, exist_ok=True)
+    # Se valida el Excel antes del OCR para no esperar en vano si está mal.
+    seriales_excel = leer_seriales_excel(excel_path) if excel_path else None
     errores: list[str] = []
     pdfs = extraer_pdfs(zip_path, trabajo / "entrada", errores)
 
@@ -145,10 +148,17 @@ def procesar_zip(zip_path: Path, trabajo: Path) -> bytes:
     (salida / "contadores.txt").write_text(contadores, encoding="utf-8")
     (salida / "errores.txt").write_text(texto_errores + "\n", encoding="utf-8")
 
+    archivos = ["contadores.txt", "errores.txt"]
+    if seriales_excel is not None:
+        filas = comparar(seriales_excel, [r.serial for r in conservados])
+        lineas = ["serial\testado\tdetalle"] + [f"{s}\t{e}\t{d}" for s, e, d in filas]
+        (salida / "comparacion.txt").write_text("﻿" + "\n".join(lineas) + "\n", encoding="utf-8")
+        archivos.append("comparacion.txt")
+
     buffer = io.BytesIO()
     with zipfile.ZipFile(buffer, "w", zipfile.ZIP_DEFLATED) as zf:
-        zf.write(salida / "contadores.txt", "contadores.txt")
-        zf.write(salida / "errores.txt", "errores.txt")
+        for nombre in archivos:
+            zf.write(salida / nombre, nombre)
         for pdf in sorted((salida / "pdfs_renombrados").glob("*.pdf")):
             zf.write(pdf, f"pdfs_renombrados/{pdf.name}")
     return buffer.getvalue()
