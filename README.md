@@ -36,6 +36,12 @@ python app.py          # http://localhost:5000
 pytest                 # pruebas de los parsers
 ```
 
+### Notas para correrlo en tu computadora
+
+- Tesseract y poppler deben estar en el `PATH` (en Windows: instala Tesseract con el idioma español y los binarios de poppler, y agrega sus carpetas `bin` al `PATH`).
+- Abre `http://localhost:5000` y sube el `.zip` (y opcionalmente el `.xlsx`).
+- Tiempo aproximado: ~1.7 minutos para 4 PDFs de 1-3 páginas (el OCR es el paso lento).
+
 ## Despliegue en Render
 
 El repositorio incluye `Dockerfile` y `render.yaml`. En Render: *New → Blueprint* (o *New → Web Service* con runtime Docker) apuntando a este repositorio. El health check es `/healthz`.
