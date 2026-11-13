@@ -112,3 +112,37 @@ def test_zip_ignora_rutas_peligrosas_y_no_pdf(tmp_path):
     assert [nombre for nombre, _ in pdfs] == ["impresora1.pdf"]
     assert any("ruta sospechosa" in e for e in errores)
     assert any("no es PDF" in e for e in errores)
+
+
+def test_ricoh_sin_etiqueta_usa_respaldo_por_formato():
+    texto = "Referencia del sistema\nXX Mg T578H602639 de\nContador total 12345\n"
+    lectura = leer(texto, [])
+    assert lectura.serial == "T578H602639"
+    assert lectura.contador == 12345
+    assert lectura.respaldo is True
+
+
+def test_hp_serie_con_formato_brb_usa_respaldo():
+    texto = "HP LaserJet MFP E52645\nBRBSQD61CN\nCiclos del motor*: 500\n"
+    lectura = leer(texto, [])
+    assert lectura.serial == "BRBSQD61CN"
+    assert lectura.respaldo is True
+
+
+def test_oki_contador_de_respaldo_mono():
+    texto = "OKI ES5112\nNumero de serie Impresora:AK97001459\nMono:123495\n"
+    lectura = leer(texto, [])
+    assert lectura.serial == "AK97001459"
+    assert lectura.contador == 123495
+    assert lectura.respaldo is False
+
+
+def test_lexmark_serie_con_etiqueta_mal_leida_usa_respaldo():
+    texto = (
+        "Estadísticas dispositivo\nImpresora\nFecha instal. 2014\nNxmero de sene 70157GHH1GY5L\n"
+        "Cómputo caras impresas\nTotal\nMono 1000\n"
+    )
+    lectura = leer(texto, [])
+    assert lectura.serial == "70157GHH1GY5L"
+    assert lectura.contador == 1000
+    assert lectura.respaldo is True

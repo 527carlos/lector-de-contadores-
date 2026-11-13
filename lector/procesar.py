@@ -28,6 +28,7 @@ class Registro:
     fecha: datetime | None
     confianza: float | None
     nota: str
+    respaldo: bool = False
 
 
 def extraer_pdfs(zip_path: Path, destino: Path, errores: list[str]) -> list[tuple[str, Path]]:
@@ -58,6 +59,7 @@ def extraer_pdfs(zip_path: Path, destino: Path, errores: list[str]) -> list[tupl
 def procesar_pdf(ruta: Path, nombre: str, directorio: Path) -> Registro:
     directorio.mkdir(parents=True, exist_ok=True)
     resultado = ocr_pdf(ruta, directorio)
+    (directorio / "ocr.txt").write_text(resultado.texto, encoding="utf-8")  # para diagnóstico
     lectura = leer(resultado.texto, resultado.palabras)
     nota = ""
     recorte = NOTA_RECORTE.get(lectura.modelo)
@@ -72,6 +74,7 @@ def procesar_pdf(ruta: Path, nombre: str, directorio: Path) -> Registro:
         fecha=lectura.fecha,
         confianza=lectura.confianza_serial,
         nota=nota,
+        respaldo=lectura.respaldo,
     )
 
 
@@ -136,6 +139,8 @@ def procesar_zip(
     # Cada tesseract usa un hilo; con varios procesos en paralelo se evita saturar la CPU.
     os.environ.setdefault("OMP_THREAD_LIMIT", "1")
     tareas = [(ruta, nombre, trabajo / f"ocr_{n:05d}") for n, (nombre, ruta) in enumerate(pdfs)]
+    diagnostico = trabajo / "diagnostico"
+    diagnostico.mkdir(parents=True, exist_ok=True)
     registros: list[Registro] = []
     if progreso:
         progreso(0, len(tareas))
@@ -146,7 +151,12 @@ def procesar_zip(
                 if registro is not None:
                     registros.append(registro)
                 else:
+                    indice = hechos - 1
                     errores.append(error)
+                    # Guarda el texto OCR para revisar por qué no se leyó el archivo.
+                    origen = tareas[indice][2] / "ocr.txt"
+                    if origen.exists():
+                        shutil.copyfile(origen, diagnostico / f"{tareas[indice][1]}.txt")
                 if progreso:
                     progreso(hechos, len(tareas))
 
@@ -162,6 +172,8 @@ def procesar_zip(
             errores.append(f"REVISAR {r.archivo}: serial {r.serial} con confianza OCR baja ({conf})")
         if re.search(r"[OI]", r.serial):
             errores.append(f"REVISAR {r.archivo}: serial {r.serial} contiene O o I; verificar si es 0 o 1")
+        if r.respaldo:
+            errores.append(f"REVISAR {r.archivo}: serial {r.serial} tomado por formato, no por etiqueta; verificar")
         if NOTA_RECORTE.get(r.modelo) and not r.nota:
             errores.append(f"REVISAR {r.archivo}: nota manuscrita no legible")
 
@@ -186,6 +198,8 @@ def procesar_zip(
     with zipfile.ZipFile(buffer, "w", zipfile.ZIP_DEFLATED) as zf:
         for nombre in archivos:
             zf.write(salida / nombre, nombre)
+        for txt in sorted(diagnostico.glob("*.txt")):
+            zf.write(txt, f"diagnostico/{txt.name}")
         for pdf in sorted((salida / "pdfs_renombrados").glob("*.pdf")):
             zf.write(pdf, f"pdfs_renombrados/{pdf.name}")
     return buffer.getvalue()

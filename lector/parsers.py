@@ -7,6 +7,10 @@ o de estadísticas cambia de un fabricante a otro:
 - HP:      "Ciclos del motor"
 - OKI:     "Total mono" (Impres.Total)
 - Ricoh:   "Contador total"
+
+Cuando la etiqueta del serial no se lee bien por OCR, se usa un patrón de
+respaldo basado en el formato del serial de cada fabricante. Esos valores se
+marcan para revisión (respaldo=True).
 """
 
 import re
@@ -43,6 +47,7 @@ class Lectura:
     contador: int
     fecha: datetime | None
     confianza_serial: float | None  # None si no se pudo verificar en el OCR
+    respaldo: bool = False          # serial obtenido con patrón de respaldo
 
 
 def _numero(texto: str) -> int:
@@ -58,61 +63,81 @@ def _fecha(anio: str, mes: int, dia: int, hora: str = "00:00:00", ampm: str | No
         return None
 
 
+def _fecha_con_mes_texto(match):
+    if not match or match.group(1)[:3].lower() not in MESES:
+        return None
+    return _fecha(match.group(3), MESES[match.group(1)[:3].lower()], int(match.group(2)),
+                  match.group(4), match.group(5).upper())
+
+
+def _serial(texto: str, patron_etiqueta: str, patron_respaldo: str | None):
+    """Devuelve (serial, usó_respaldo). Busca primero por etiqueta y luego por formato."""
+    m = re.search(patron_etiqueta, texto, re.I)
+    if m:
+        return m.group(1).upper(), False
+    if patron_respaldo:
+        m = re.search(patron_respaldo, texto)
+        if m:
+            return m.group(1).upper(), True
+    return None, False
+
+
 def _ricoh(t: str):
-    serial = re.search(r"(?:ID|1D|lD)\s*m[aá]quina\s+" + SERIE, t, re.I)
+    serial, respaldo = _serial(
+        t,
+        r"(?:ID|1D|lD|I[dD])\s*m\S{1,6}\s+" + SERIE,
+        r"\b(T578[A-Z0-9]{6,8})\b",
+    )
     contador = re.search(r"Contador\s+total[ \t]+(\d[\d.,]*)", t, re.I)
     fecha = re.search(
         r"(\w{3})\.?\s*(\d{1,2}),?\s*(\d{4})\s+(\d{1,2}:\d{2}:\d{2})\s*(AM|PM)", t, re.I
     )
-    f = None
-    if fecha and fecha.group(1)[:3].lower() in MESES:
-        f = _fecha(fecha.group(3), MESES[fecha.group(1)[:3].lower()], int(fecha.group(2)),
-                   fecha.group(4), fecha.group(5).upper())
-    return (
-        serial.group(1).upper() if serial else None,
-        _numero(contador.group(1)) if contador else None,
-        f,
-    )
+    return serial, _numero(contador.group(1)) if contador else None, _fecha_con_mes_texto(fecha), respaldo
 
 
 def _lexmark(t: str):
     # El serial de la impresora está bajo el encabezado "Impresora" (no el de cartuchos).
-    serial = None
+    serial, respaldo = None, False
     encabezado = re.search(r"^[ \t]*Impresora[ \t]*$", t, re.M)
     if encabezado:
         bloque = t[encabezado.end(): encabezado.end() + 400]
-        m = re.search(r"N[úu]mero\s+de\s+serie[ \t]+" + SERIE, bloque, re.I)
-        serial = m.group(1).upper() if m else None
+        serial, respaldo = _serial(bloque, r"N\S{1,2}mero\s+de\s+serie[ \t]+" + SERIE, None)
+    if not serial:
+        m = re.search(r"\b(70[0-9A-Z]{11})\b", t)
+        if m:
+            serial, respaldo = m.group(1), True
 
     contador = None
-    seccion = re.search(r"C[oó]mputo\s+caras\s+impresas", t, re.I)
+    seccion = re.search(r"C\S{1,2}mputo\s+caras\s+impresas", t, re.I)
     if seccion:
         m = re.search(r"Total[ \t:.]*\n\s*Mono[ \t]+(\d[\d.,]*)", t[seccion.end():], re.I)
         contador = _numero(m.group(1)) if m else None
 
-    fecha = re.search(r"Fecha\s+de\s+impresi[oó]n\s+(\d{4})-(\d{2})-(\d{2})", t, re.I)
+    fecha = re.search(r"Fecha\s+de\s+impresi\S{1,2}n\s+(\d{4})-(\d{2})-(\d{2})", t, re.I)
     f = _fecha(fecha.group(1), int(fecha.group(2)), int(fecha.group(3))) if fecha else None
-    return serial, contador, f
+    return serial, contador, f, respaldo
 
 
 def _hp(t: str):
-    serial = re.search(r"N[úu]mero\s+de\s+serie\s+del\s+producto:\s*" + SERIE, t, re.I)
-    contador = re.search(r"Ciclos\s+del\s+motor\*?:\s*(\d[\d.,]*)", t, re.I)
-    fecha = re.search(r"(\w{3})/(\d{2})/(\d{4})\s+(\d{1,2}:\d{2}:\d{2})\s*(AM|PM)", t, re.I)
-    f = None
-    if fecha and fecha.group(1)[:3].lower() in MESES:
-        f = _fecha(fecha.group(3), MESES[fecha.group(1)[:3].lower()], int(fecha.group(2)),
-                   fecha.group(4), fecha.group(5).upper())
-    return (
-        serial.group(1).upper() if serial else None,
-        _numero(contador.group(1)) if contador else None,
-        f,
+    serial, respaldo = _serial(
+        t,
+        r"N\S{1,2}mero\s+de\s+serie\s+del\s+producto\S*\s*" + SERIE,
+        r"\b((?:MXB|BRB)[A-Z0-9]{6,8})\b",
     )
+    contador = re.search(r"Ciclos\s+del\s+motor\S{0,2}\s*:?\s*(\d[\d.,]*)", t, re.I)
+    fecha = re.search(r"(\w{3})/(\d{2})/(\d{4})\s+(\d{1,2}:\d{2}:\d{2})\s*(AM|PM)", t, re.I)
+    return serial, _numero(contador.group(1)) if contador else None, _fecha_con_mes_texto(fecha), respaldo
 
 
 def _oki(t: str):
-    serial = re.search(r"N[úu]mero\s+de\s+serie\s+Impresora:?\s*" + SERIE, t, re.I)
-    contador = re.search(r"Impres\.\s*Total[ \t]+(\d[\d.,]*)", t, re.I)
+    serial, respaldo = _serial(
+        t,
+        r"N\S{1,2}mero\s+de\s+serie\s+Impresora:?\s*" + SERIE,
+        r"\b(AK[0-9A-Z]{8})\b",
+    )
+    contador = re.search(r"Impres\.\s*Total[ \t]+(\d[\d.,]*)", t, re.I) or re.search(
+        r"Mono\s*:\s*(\d{4,})", t, re.I
+    )
     fecha = re.search(r"(\d{2})/(\d{2})/(\d{4})\s+(\d{2}:\d{2})", t)
     f = None
     if fecha:
@@ -121,18 +146,14 @@ def _oki(t: str):
                                   "%Y-%m-%d %H:%M")
         except ValueError:
             f = None
-    return (
-        serial.group(1).upper() if serial else None,
-        _numero(contador.group(1)) if contador else None,
-        f,
-    )
+    return serial, _numero(contador.group(1)) if contador else None, f, respaldo
 
 
 MODELOS = [
-    ("Ricoh SP 4510DN", r"RICOH|Contador\s+total", _ricoh),
-    ("Lexmark MX511de", r"Lexmark|Estad[ií]sticas\s+dispositivo", _lexmark),
-    ("HP LaserJet MFP E52645", r"HP\s+LaserJet|Ciclos\s+del\s+motor", _hp),
-    ("OKI ES5112", r"\bOKI\b|Infor\.?\s*uso\s+impresora|Impres\.\s*Total", _oki),
+    ("Ricoh SP 4510DN", r"R\W?[il1]\W?C\W?OH|Contador\s+total", _ricoh),
+    ("Lexmark MX511de", r"Lexmark|L[e3]xm[a@]rk|Estad\S{1,2}sticas\s+dispositivo", _lexmark),
+    ("HP LaserJet MFP E52645", r"HP\s*Laser\s*Jet|LaserJet|Ciclos\s+del\s+motor", _hp),
+    ("OKI ES5112", r"\bOKI\b|ES\s?5112|Infor\.?\s*uso\s+impresora|Impres\.\s*Total", _oki),
 ]
 
 
@@ -144,7 +165,7 @@ def confianza_serial(serial: str, palabras: list[tuple[str, float]]) -> float | 
 def leer(texto: str, palabras: list[tuple[str, float]]) -> Lectura:
     for modelo, patron, extractor in MODELOS:
         if re.search(patron, texto, re.I):
-            serial, contador, fecha = extractor(texto)
+            serial, contador, fecha, respaldo = extractor(texto)
             if not serial:
                 raise LecturaError(f"{modelo}: no se encontró el número de serie")
             if contador is None:
@@ -155,5 +176,6 @@ def leer(texto: str, palabras: list[tuple[str, float]]) -> Lectura:
                 contador=contador,
                 fecha=fecha,
                 confianza_serial=confianza_serial(serial, palabras),
+                respaldo=respaldo,
             )
     raise LecturaError("modelo de impresora no reconocido")
