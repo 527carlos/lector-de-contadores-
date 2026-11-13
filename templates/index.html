@@ -38,9 +38,72 @@
       <input type="file" name="excel" accept=".xlsx">
       <p>Si subes el listado, recibirás también <code>comparacion.txt</code> con los seriales que coinciden, faltan o sobran.
          La primera columna del Excel (o la que se titule "Serial" / "Número de serie") se usa como listado.</p>
-      <button type="submit">Procesar</button>
+      <button type="submit" id="boton">Procesar</button>
     </form>
+    <div id="progreso" hidden style="margin-top:16px">
+      <p id="texto"></p>
+      <progress id="barra" max="100" value="0" style="width:100%"></progress>
+    </div>
   </div>
 </main>
+<script>
+  const form = document.querySelector("form");
+  const boton = document.getElementById("boton");
+  const bloque = document.getElementById("progreso");
+  const texto = document.getElementById("texto");
+  const barra = document.getElementById("barra");
+
+  function mostrar(msg, pct, esError) {
+    bloque.hidden = false;
+    texto.textContent = msg;
+    texto.style.color = esError ? "var(--error)" : "";
+    if (pct !== undefined) barra.value = pct;
+  }
+
+  function seguir(id) {
+    const timer = setInterval(async () => {
+      try {
+        const r = await fetch("/estado/" + id);
+        const j = await r.json();
+        if (j.estado === "procesando") {
+          const pct = j.total ? Math.round((j.hechos / j.total) * 100) : 0;
+          mostrar(j.total ? `Procesando PDF ${j.hechos} de ${j.total}...` : "Preparando archivos...", pct);
+        } else {
+          clearInterval(timer);
+          boton.disabled = false;
+          if (j.estado === "listo") {
+            mostrar("Listo. Descargando resultado...", 100);
+            location.href = "/descargar/" + id;
+          } else {
+            mostrar(j.error || "Error al procesar.", undefined, true);
+          }
+        }
+      } catch (e) {
+        clearInterval(timer);
+        boton.disabled = false;
+        mostrar("Se perdió la conexión con el servidor. Revisa la terminal.", undefined, true);
+      }
+    }, 2000);
+  }
+
+  form.addEventListener("submit", async (e) => {
+    e.preventDefault();
+    boton.disabled = true;
+    mostrar("Subiendo archivos...", 0);
+    try {
+      const r = await fetch("/procesar", { method: "POST", body: new FormData(form) });
+      const j = await r.json();
+      if (!r.ok) {
+        boton.disabled = false;
+        mostrar(j.error || "Error al subir.", undefined, true);
+        return;
+      }
+      seguir(j.id);
+    } catch (e) {
+      boton.disabled = false;
+      mostrar("No se pudo subir el archivo.", undefined, true);
+    }
+  });
+</script>
 </body>
 </html>

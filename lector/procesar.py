@@ -2,13 +2,16 @@
 
 import csv
 import io
+import os
 import re
 import shutil
 import subprocess
 import zipfile
+from concurrent.futures import ProcessPoolExecutor
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path, PurePosixPath
+from typing import Callable, Optional
 
 from .comparar import comparar, leer_seriales_excel
 from .ocr import ocr_nota, ocr_pdf
@@ -105,23 +108,47 @@ def _contadores_tsv(conservados: list[Registro]) -> str:
     return "﻿" + salida.getvalue()
 
 
-def procesar_zip(zip_path: Path, trabajo: Path, excel_path: Path | None = None) -> bytes:
+def _procesar_seguro(tarea: tuple[Path, str, Path]):
+    """Versión de procesar_pdf que nunca lanza excepciones (para ejecutar en otro proceso)."""
+    ruta, nombre, directorio = tarea
+    try:
+        return procesar_pdf(ruta, nombre, directorio), None
+    except LecturaError as e:
+        return None, f"{nombre}: {e}"
+    except subprocess.CalledProcessError as e:
+        return None, f"{nombre}: falló el OCR o la conversión del PDF ({e.cmd[0]})"
+    except Exception as e:  # un PDF dañado no debe detener el lote
+        return None, f"{nombre}: error inesperado ({type(e).__name__}: {e})"
+
+
+def procesar_zip(
+    zip_path: Path,
+    trabajo: Path,
+    excel_path: Path | None = None,
+    progreso: Optional[Callable[[int, int], None]] = None,
+) -> bytes:
     trabajo.mkdir(parents=True, exist_ok=True)
     # Se valida el Excel antes del OCR para no esperar en vano si está mal.
     seriales_excel = leer_seriales_excel(excel_path) if excel_path else None
     errores: list[str] = []
     pdfs = extraer_pdfs(zip_path, trabajo / "entrada", errores)
 
+    # Cada tesseract usa un hilo; con varios procesos en paralelo se evita saturar la CPU.
+    os.environ.setdefault("OMP_THREAD_LIMIT", "1")
+    tareas = [(ruta, nombre, trabajo / f"ocr_{n:05d}") for n, (nombre, ruta) in enumerate(pdfs)]
     registros: list[Registro] = []
-    for n, (nombre, ruta) in enumerate(pdfs):
-        try:
-            registros.append(procesar_pdf(ruta, nombre, trabajo / f"ocr_{n:05d}"))
-        except LecturaError as e:
-            errores.append(f"{nombre}: {e}")
-        except subprocess.CalledProcessError as e:
-            errores.append(f"{nombre}: falló el OCR o la conversión del PDF ({e.cmd[0]})")
-        except Exception as e:  # un PDF dañado no debe detener el lote
-            errores.append(f"{nombre}: error inesperado ({type(e).__name__}: {e})")
+    if progreso:
+        progreso(0, len(tareas))
+    if tareas:
+        workers = max(1, min(len(tareas), os.cpu_count() or 1))
+        with ProcessPoolExecutor(max_workers=workers) as pool:
+            for hechos, (registro, error) in enumerate(pool.map(_procesar_seguro, tareas), start=1):
+                if registro is not None:
+                    registros.append(registro)
+                else:
+                    errores.append(error)
+                if progreso:
+                    progreso(hechos, len(tareas))
 
     conservados, descartados = deduplicar(registros)
     for descartado, ganador in descartados:
