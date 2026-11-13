@@ -8,8 +8,11 @@ from flask import Flask, abort, jsonify, render_template, request, send_file
 
 from lector.comparar import ExcelError, leer_seriales_excel
 from lector.procesar import procesar_zip
+from lector.rutas import configurar_entorno, directorio_base
 
-app = Flask(__name__)
+configurar_entorno()
+
+app = Flask(__name__, template_folder=str(directorio_base() / "templates"))
 app.config["MAX_CONTENT_LENGTH"] = 300 * 1024 * 1024  # 300 MB
 
 # Trabajos en segundo plano: id -> estado. Vive en memoria del proceso del servidor.

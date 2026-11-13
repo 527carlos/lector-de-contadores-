@@ -1,0 +1,60 @@
+name: Empaquetar para Windows
+
+on:
+  workflow_dispatch:
+
+jobs:
+  empaquetar:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Instalar Tesseract
+        run: choco install tesseract -y --no-progress
+
+      - name: Agregar idioma español a Tesseract
+        shell: pwsh
+        run: |
+          $destino = "C:\Program Files\Tesseract-OCR\tessdata\spa.traineddata"
+          Invoke-WebRequest -Uri "https://github.com/tesseract-ocr/tessdata_fast/raw/main/spa.traineddata" -OutFile $destino
+          Get-Item $destino | Select-Object Name, Length
+
+      - name: Descargar poppler
+        shell: pwsh
+        run: |
+          $url = "https://github.com/oschwartz10612/poppler-windows/releases/download/v24.08.0-0/Release-24.08.0-0.zip"
+          Invoke-WebRequest -Uri $url -OutFile poppler.zip
+          Expand-Archive poppler.zip -DestinationPath poppler-tmp
+          $bin = Get-ChildItem poppler-tmp -Recurse -Directory -Filter bin | Where-Object { $_.FullName -match "Library\\bin$" } | Select-Object -First 1
+          New-Item -ItemType Directory -Force -Path build\poppler\bin | Out-Null
+          Copy-Item "$($bin.FullName)\*" build\poppler\bin -Recurse
+
+      - name: Copiar Tesseract al paquete
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path build\tesseract | Out-Null
+          Copy-Item "C:\Program Files\Tesseract-OCR\*" build\tesseract -Recurse
+
+      - name: Instalar dependencias de Python
+        run: pip install -r requirements-build.txt
+
+      - name: Empaquetar con PyInstaller
+        run: >
+          pyinstaller --noconfirm --onedir --name LectorContadores
+          --add-data "templates;templates"
+          --add-data "build/tesseract;tesseract"
+          --add-data "build/poppler;poppler"
+          launcher.py
+
+      - name: Crear zip para descargar
+        shell: pwsh
+        run: Compress-Archive -Path dist\LectorContadores -DestinationPath LectorContadores-windows.zip
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: LectorContadores-windows
+          path: LectorContadores-windows.zip
